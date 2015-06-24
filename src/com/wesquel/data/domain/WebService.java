@@ -1,5 +1,6 @@
 package com.wesquel.data.domain;
 
+import com.wesquel.db.ResultTable;
 import com.wesquel.exceptions.DuplicateKeyException;
 import com.wesquel.exceptions.NotFoundException;
 import com.wesquel.exceptions.ValidationException;
@@ -236,16 +237,24 @@ public class WebService
 
 	public static void main(String[] args) throws Exception
 	{
-		WebService ws = new WebService("iTunes", "http://itunes.apple.com/search");
+		WebService facebook = new WebService("Facebook", "https://graph.facebook.com/v2.3/me/feed");
 
-		ws.addParameter(new WSParameter("text", "term", "Linkin Park"));
+		facebook.addParameter(new WSParameter("access_token", "access_token", "CAACEdEose0cBAMvhyHe3yJu7wbCqHboXYZB29VMLWOK1syT58BD98S5tRZCSEM4sidRfcbi1x52NocZAxfZCRVfkps46DaoRTeUuj0M5QZBUvbDHAfmFJwivbI5fpLq1GPZBrsy5UXEH4jMRoWQUgKigU2AZAEVTEOJhxZCVPvz9f9ySbvVWxeqgleBZAlWpgfXH2x1TjlC7apKgdgzl6drzh9JceCGCdLY4ZD"));
 
 		Map<String, String> values = new HashMap<>();
 
-		//values.put("text", "Offspring");
+		WebService weather = new WebService("weather", "http://api.openweathermap.org/data/2.5/weather");
 
-		HttpResponse response = ws.execute(values);
+		weather.addParameter(new WSParameter("city", "q", "New York, NY"));
 
-		System.out.println(IOUtils.toString(response.getEntity().getContent()));
+		values.put("city", "94566");
+
+		HttpResponse response = facebook.execute(values);
+
+		String json = IOUtils.toString(response.getEntity().getContent());
+
+		ResultTable resultTable = new ResultTable();
+
+		resultTable.analyzeJSON("facebook", json);
 	}
 }

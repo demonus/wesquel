@@ -5,11 +5,13 @@ import com.google.gson.stream.JsonToken;
 import com.wesquel.data.domain.sql.JsonSqlValueMap;
 import com.wesquel.data.domain.sql.SqlTableRow;
 import com.wesquel.exceptions.InvalidActionException;
+import org.apache.commons.lang.StringUtils;
 
 import java.io.IOException;
 import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Created by root on 6/3/15.
@@ -17,30 +19,37 @@ import java.util.List;
 public class ResultTable
 {
 
-	private void analyzeJSON(String alias, String json) throws IOException, InvalidActionException
+	public void analyzeJSON(String alias, String json) throws IOException, InvalidActionException
 	{
 		JsonReader reader = new JsonReader(new StringReader(json));
 
-		List<JsonSqlValueMap> tables = new ArrayList<>();
+		Map<String, JsonSqlValueMap> tables = new LinkedHashMap<>();
 
 		reader.beginObject();
 
 		JsonSqlValueMap jsonObject = new JsonSqlValueMap(alias);
 
-		tables.add(jsonObject);
+		tables.put(alias, jsonObject);
 
-		readJSON(alias, reader, jsonObject, false, tables);
+		readJSON(alias, reader, jsonObject, false, tables, "");
 
 		jsonObject.completeActiveRow();
 
-		for (JsonSqlValueMap table : tables)
+		for (Map.Entry<String, JsonSqlValueMap> tableEntry : tables.entrySet())
 		{
-			System.out.println(table);
+			JsonSqlValueMap table = tableEntry.getValue();
+
+			System.out.println("\n" + table.getCreateStatement() + "\n");
+
+			for (String s : table.getInsertStatements())
+			{
+				System.out.println(s + "\n");
+			}
 		}
 	}
 
 	private void readJSON(String alias, JsonReader reader, JsonSqlValueMap valueMap, boolean isArray,
-						  List<JsonSqlValueMap> tables) throws
+						  Map<String, JsonSqlValueMap> tables, String prefix) throws
 			IOException, InvalidActionException
 	{
 		while (reader.hasNext())
@@ -67,50 +76,62 @@ public class ResultTable
 					name = alias;
 				}
 
-				System.out.println("begin object " + name);
-
 				reader.beginObject();
 
-				JsonSqlValueMap newTable;
+				String newPrefix;
 
 				if (isArray && isUnnamedObject)
 				{
-					newTable = valueMap;
+					newPrefix = prefix;
 				}
 				else
 				{
-					newTable = new JsonSqlValueMap(name);
-
-					tables.add(newTable);
+					newPrefix = prefix + name + "$";
 				}
 
-				readJSON(alias, reader, newTable, false, tables);
+				readJSON(alias, reader, valueMap, false, tables, newPrefix);
 
 				reader.endObject();
 
-				newTable.completeActiveRow();
+				if (isArray && isUnnamedObject)
+				{
+					valueMap.completeActiveRow();
+				}
 
-				System.out.println("end object " + name);
-
-				readJSON(alias, reader, valueMap, isArray, tables);
+				readJSON(alias, reader, valueMap, isArray, tables, prefix);
 			}
 			else if (token == JsonToken.BEGIN_ARRAY)
 			{
-				System.out.println("begin array " + name);
-
 				reader.beginArray();
 
-				JsonSqlValueMap newTable = new JsonSqlValueMap(name);
+				String tableName = alias + "$" + prefix + name;
 
-				tables.add(newTable);
+				JsonSqlValueMap newTable = new JsonSqlValueMap(tableName);
 
-				readJSON(alias, reader, newTable, true, tables);
+				String idFieldName = tableName + "$id";
+
+				String idFieldValue = StringUtils.replace(UUID.randomUUID().toString(), "-", "");
+
+				newTable.setIdField(idFieldName, idFieldValue);
+
+				valueMap.getActiveRow().addValue(idFieldName, idFieldValue, JsonToken.STRING);
+
+				readJSON(alias, reader, newTable, true, tables, prefix + name + "$");
 
 				reader.endArray();
 
-				System.out.println("end array " + name);
+				if (tables.containsKey(tableName))
+				{
+					JsonSqlValueMap existingTable = tables.get(tableName);
 
-				readJSON(alias, reader, valueMap, isArray, tables);
+					existingTable.merge(newTable);
+				}
+				else
+				{
+					tables.put(tableName, newTable);
+				}
+
+				readJSON(alias, reader, valueMap, isArray, tables, prefix);
 			}
 			else
 			{
@@ -139,9 +160,7 @@ public class ResultTable
 						obj = reader.nextString();
 					}
 
-					row.addValue(name, obj, token);
-
-					System.out.println(name + " = " + obj);
+					row.addValue(prefix + name, obj, token);
 				}
 				else
 				{

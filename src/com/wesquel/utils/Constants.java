@@ -16,7 +16,7 @@ public class Constants
 	public static Map<JsonToken, SQLType> jsonTokenToSQLTypeMap = new HashMap<JsonToken, SQLType>()
 	{{
 			this.put(JsonToken.STRING, JDBCType.VARCHAR);
-			this.put(JsonToken.NUMBER, JDBCType.NUMERIC);
+			this.put(JsonToken.NUMBER, JDBCType.INTEGER);
 			this.put(JsonToken.BOOLEAN, JDBCType.BOOLEAN);
 			this.put(JsonToken.NULL, JDBCType.NULL);
 		}};

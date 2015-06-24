@@ -1,13 +1,16 @@
 package com.wesquel.data.domain.sql;
 
+import com.google.gson.stream.JsonToken;
+import com.wesquel.exceptions.InvalidActionException;
 import com.wesquel.utils.Constants;
 import com.wesquel.utils.KeyValuePair;
 
 import java.sql.JDBCType;
 import java.sql.SQLType;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Map;
 
 /**
  * Created by dmitriy on 6/8/15.
@@ -22,7 +25,10 @@ public class JsonSqlValueMap
 
 	private List<SqlTableRow> rows;
 
-	private List<KeyValuePair<String, SQLType>> fields;
+	private Map<String, KeyValuePair<String, SQLType>> fields;
+
+	private KeyValuePair<String, String> idField = null;
+
 
 	public JsonSqlValueMap(String tableName)
 	{
@@ -87,6 +93,18 @@ public class JsonSqlValueMap
 
 			if (!row.isLocked())
 			{
+				if (idField != null)
+				{
+					try
+					{
+						row.addValue(idField.getKey(), idField.getValue(), JsonToken.STRING);
+					}
+					catch (InvalidActionException e)
+					{
+						e.printStackTrace();
+					}
+				}
+
 				row.complete();
 
 				generateFieldsList(row);
@@ -114,15 +132,19 @@ public class JsonSqlValueMap
 	{
 		if (fields == null && row != null && row.isLocked())
 		{
-			fields = row.getValueList().stream().map(n -> {
-				return new KeyValuePair<>(n.getName(),
-						Constants.jsonTokenToSQLTypeMap.getOrDefault(n.getValueType(),
-								JDBCType.VARCHAR));
-			}).collect(Collectors.toList());
+			fields = new LinkedHashMap<>(row.size());
+
+			for (FieldData fieldData : row.getValueList())
+			{
+				KeyValuePair<String, SQLType> newField = new KeyValuePair<>(fieldData.getName(),
+						getFieldType(fieldData.getValueType(), fieldData.getValueData()));
+
+				fields.put(fieldData.getName(), newField);
+			}
 		}
 	}
 
-	public List<KeyValuePair<String, SQLType>> getFields()
+	public Map<String, KeyValuePair<String, SQLType>> getFields()
 	{
 		if (fields == null)
 		{
@@ -168,7 +190,7 @@ public class JsonSqlValueMap
 		{
 			first = true;
 
-			for (KeyValuePair<String, SQLType> field : fields)
+			for (Map.Entry<String, KeyValuePair<String, SQLType>> field : fields.entrySet())
 			{
 				if (!first)
 				{
@@ -179,12 +201,221 @@ public class JsonSqlValueMap
 					first = false;
 				}
 
-				s.append(field);
+				s.append(field.getValue());
 			}
 		}
 
 		s.append("\n}\n}");
 
 		return s.toString();
+	}
+
+
+	public String getCreateStatement()
+	{
+		if (fields != null)
+		{
+			StringBuilder sql = (new StringBuilder("create table ")).append(tableName).append(" (");
+
+			boolean first = true;
+
+			for (Map.Entry<String, KeyValuePair<String, SQLType>> field : fields.entrySet())
+			{
+				if (!first)
+				{
+					sql.append(", ");
+				}
+				else
+				{
+					first = false;
+				}
+
+				sql.append(field.getKey()).append(" ").append(field.getValue().getValue().getName());
+
+				if (field.getValue().getValue() == JDBCType.VARCHAR)
+				{
+					sql.append("(1000)");
+				}
+			}
+
+			sql.append(")");
+
+			return sql.toString();
+		}
+		else
+		{
+			return null;
+		}
+	}
+
+	public String[] getInsertStatements()
+	{
+		String[] res = new String[rows.size()];
+
+		if (fields != null)
+		{
+
+			StringBuilder insert = (new StringBuilder("insert into ")).append(tableName).append("(");
+
+			boolean first = true;
+
+			for (Map.Entry<String, KeyValuePair<String, SQLType>> field : fields.entrySet())
+			{
+				if (!first)
+				{
+					insert.append(", ");
+				}
+				else
+				{
+					first = false;
+				}
+
+				insert.append(field.getKey());
+			}
+
+			insert.append(") values (");
+
+			for (int i = 0; i < rows.size(); i++)
+			{
+				SqlTableRow row = rows.get(i);
+
+				StringBuilder sql = new StringBuilder(insert);
+
+				first = true;
+
+				for (FieldData fieldData : row.getValueList())
+				{
+					if (!first)
+					{
+						sql.append(", ");
+					}
+					else
+					{
+						first = false;
+					}
+
+					sql.append(fieldData.getValueType() == JsonToken.STRING ?
+							"'" + fieldData.getValueData() + "'" : fieldData.getValueData());
+				}
+
+				sql.append(");");
+
+				res[i] = sql.toString();
+			}
+		}
+
+		return res;
+	}
+
+	public void setIdField(String idFieldName, String idFieldValue)
+	{
+		this.idField = new KeyValuePair<>(idFieldName, idFieldValue);
+	}
+
+	public String getIdFieldName()
+	{
+		if (idField != null)
+		{
+			return idField.getKey();
+		}
+		else
+		{
+			return null;
+		}
+	}
+
+	public String getIdFieldValue()
+	{
+		if (idField != null)
+		{
+			return idField.getValue();
+		}
+		else
+		{
+			return null;
+		}
+	}
+
+	public KeyValuePair<String, String> getIdField()
+	{
+		return idField;
+	}
+
+
+	public void merge(JsonSqlValueMap source) throws InvalidActionException
+	{
+		if (source == null)
+		{
+			throw new NullPointerException("Source object is NULL!");
+		}
+		else
+		{
+			if (source.getRows().size() > 0)
+			{
+				SqlTableRow row = source.getRows().get(source.getRows().size() - 1);
+
+				if (!row.isLocked())
+				{
+					throw new InvalidActionException("Source is not completed!");
+				}
+
+				if (rows.size() > 0 && !rows.get(rows.size() - 1).isLocked())
+				{
+					throw new InvalidActionException("Target is not completed!");
+				}
+
+				if (fields == null)
+				{
+					generateFieldsList(row);
+				}
+				else
+				{
+					for (FieldData fieldData : row.getValueList())
+					{
+						if (!fields.containsKey(fieldData.getName()))
+						{
+							KeyValuePair<String, SQLType> newField = new KeyValuePair<>(fieldData.getName(),
+									getFieldType(fieldData.getValueType(), fieldData.getValueData()));
+
+							fields.put(fieldData.getName(), newField);
+						}
+						else
+						{
+							SQLType newFieldType = getFieldType(fieldData.getValueType(), fieldData.getValueData());
+
+							KeyValuePair<String, SQLType> existingField = fields.get(fieldData.getName());
+
+							if (!existingField.getValue().equals(newFieldType))
+							{
+								SQLType targetType = JDBCType.VARCHAR;
+
+								if (existingField.getValue().equals(JDBCType.INTEGER) &&
+										(newFieldType.equals(JDBCType.DOUBLE)))
+								{
+									targetType = newFieldType;
+								}
+								else if (existingField.getValue().equals(JDBCType.NULL))
+								{
+									targetType = newFieldType;
+								}
+
+								existingField.setValue(targetType);
+							}
+						}
+					}
+				}
+
+				rows.addAll(source.rows);
+			}
+		}
+	}
+
+	private SQLType getFieldType(JsonToken jsonToken, Object fieldData)
+	{
+		return (jsonToken == JsonToken.NUMBER &&
+				((Double) fieldData) % 1 !=
+						0) ? JDBCType.DOUBLE : Constants.jsonTokenToSQLTypeMap
+				.getOrDefault(jsonToken,
+						JDBCType.VARCHAR);
 	}
 }
