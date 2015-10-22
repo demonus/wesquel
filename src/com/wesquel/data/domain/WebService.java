@@ -1,5 +1,6 @@
 package com.wesquel.data.domain;
 
+import com.wesquel.db.ConnectionPool;
 import com.wesquel.db.ResultTable;
 import com.wesquel.exceptions.DuplicateKeyException;
 import com.wesquel.exceptions.NotFoundException;
@@ -17,8 +18,9 @@ import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.message.BasicNameValuePair;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -239,7 +241,8 @@ public class WebService
 	{
 		WebService facebook = new WebService("Facebook", "https://graph.facebook.com/v2.3/me/feed");
 
-		facebook.addParameter(new WSParameter("access_token", "access_token", "CAACEdEose0cBAMvhyHe3yJu7wbCqHboXYZB29VMLWOK1syT58BD98S5tRZCSEM4sidRfcbi1x52NocZAxfZCRVfkps46DaoRTeUuj0M5QZBUvbDHAfmFJwivbI5fpLq1GPZBrsy5UXEH4jMRoWQUgKigU2AZAEVTEOJhxZCVPvz9f9ySbvVWxeqgleBZAlWpgfXH2x1TjlC7apKgdgzl6drzh9JceCGCdLY4ZD"));
+		facebook.addParameter(new WSParameter("access_token", "access_token",
+				"CAACEdEose0cBADxtZBDZBmcHlUUCS9gR2OAv0BPYHR1SDZBVuz6P6ZC5aJFrXsvAAzrAPW99WVLWu2ZAZCM9hzXPGxLNawzktXVpZAoyszGWciqN6cUiSey5l7I1GxdZCa1ZARZAzN2tOklpSZCSAiiSwgfVwNiLkVFirxZAPrBxujCyEipgleRYZCmOTQn7YwALQFrU0DtzjlZBotNkqISLIuug470AgN33JF30wZD"));
 
 		Map<String, String> values = new HashMap<>();
 
@@ -253,8 +256,23 @@ public class WebService
 
 		String json = IOUtils.toString(response.getEntity().getContent());
 
+		Class.forName("com.mysql.jdbc.Driver");
+
+		Connection con =
+				DriverManager.getConnection("jdbc:mysql://127.0.0.1:3306/wesquel?zeroDateTimeBehavior=convertToNull" +
+						"&autoReconnect=true" +
+						"&useUnicode=true&characterEncoding=utf8&jdbcCompliantTruncation=false&useServerPrepStmts" +
+						"=true" +
+						"&allowMultiQueries=true&rollbackOnPooledClose=false", "root", "root");
+
+		ConnectionPool connectionPool = new ConnectionPool();
+
+		//Connection connection = connectionPool.getConnection();
+
 		ResultTable resultTable = new ResultTable();
 
-		resultTable.analyzeJSON("facebook", json);
+		resultTable.analyzeJSON("facebook", json, con);
+
+		con.close();
 	}
 }

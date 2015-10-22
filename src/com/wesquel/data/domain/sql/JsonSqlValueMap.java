@@ -4,8 +4,12 @@ import com.google.gson.stream.JsonToken;
 import com.wesquel.exceptions.InvalidActionException;
 import com.wesquel.utils.Constants;
 import com.wesquel.utils.KeyValuePair;
+import com.wesquel.utils.Utils;
 
+import java.sql.Connection;
 import java.sql.JDBCType;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.SQLType;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,7 +50,7 @@ public class JsonSqlValueMap
 
 		this.rows = new ArrayList<>(rowInitialCount);
 
-		this.tableName = tableName;
+		this.tableName = tableName;// + "_" + StringUtils.replace(UUID.randomUUID().toString(), "-", "");
 	}
 
 	public String getTableName()
@@ -130,16 +134,24 @@ public class JsonSqlValueMap
 
 	private void generateFieldsList(SqlTableRow row)
 	{
-		if (fields == null && row != null && row.isLocked())
+		if (row != null && row.isLocked())
 		{
-			fields = new LinkedHashMap<>(row.size());
+			if (fields == null)
+			{
+				fields = new LinkedHashMap<>(row.size());
+			}
 
 			for (FieldData fieldData : row.getValueList())
 			{
-				KeyValuePair<String, SQLType> newField = new KeyValuePair<>(fieldData.getName(),
-						getFieldType(fieldData.getValueType(), fieldData.getValueData()));
+				String fieldName = fieldData.getName();
 
-				fields.put(fieldData.getName(), newField);
+				if (fieldName != null && !fields.containsKey(fieldName))
+				{
+					KeyValuePair<String, SQLType> newField = new KeyValuePair<>(fieldName,
+							getFieldType(fieldData.getValueType(), fieldData.getValueData()));
+
+					fields.put(fieldData.getName(), newField);
+				}
 			}
 		}
 	}
@@ -248,63 +260,76 @@ public class JsonSqlValueMap
 		}
 	}
 
-	public String[] getInsertStatements()
+	public void executeSql(Connection connection) throws SQLException
 	{
-		String[] res = new String[rows.size()];
-
 		if (fields != null)
 		{
+			PreparedStatement pstInsert = null;
 
-			StringBuilder insert = (new StringBuilder("insert into ")).append(tableName).append("(");
+			PreparedStatement pstCreate = null;
 
-			boolean first = true;
-
-			for (Map.Entry<String, KeyValuePair<String, SQLType>> field : fields.entrySet())
+			try
 			{
-				if (!first)
-				{
-					insert.append(", ");
-				}
-				else
-				{
-					first = false;
-				}
+				pstCreate = connection.prepareStatement(getCreateStatement());
 
-				insert.append(field.getKey());
+				pstCreate.executeUpdate();
+			}
+			finally
+			{
+				Utils.close(pstCreate);
 			}
 
-			insert.append(") values (");
-
-			for (int i = 0; i < rows.size(); i++)
+			for (SqlTableRow row : rows)
 			{
-				SqlTableRow row = rows.get(i);
 
-				StringBuilder sql = new StringBuilder(insert);
+				StringBuilder insert = (new StringBuilder("insert into ")).append(tableName).append("(");
 
-				first = true;
+				StringBuilder values = new StringBuilder();
+
+				boolean first = true;
 
 				for (FieldData fieldData : row.getValueList())
 				{
 					if (!first)
 					{
-						sql.append(", ");
+						insert.append(", ");
+
+						values.append(", ");
 					}
 					else
 					{
 						first = false;
 					}
 
-					sql.append(fieldData.getValueType() == JsonToken.STRING ?
-							"'" + fieldData.getValueData() + "'" : fieldData.getValueData());
+					insert.append(fieldData.getName());
+
+					values.append("?");
 				}
 
-				sql.append(");");
+				insert.append(") values (").append(values).append(")");
 
-				res[i] = sql.toString();
+				try
+				{
+					pstInsert = connection.prepareStatement(insert.toString());
+
+					for (int i = 0; i < row.getValueList().size(); i++)
+					{
+						FieldData fieldData = row.getValueList().get(i);
+
+						KeyValuePair<String, SQLType> fieldDefinition = getFields().get(fieldData.getName());
+
+						pstInsert.setObject(i + 1, fieldData.getValueData(),
+								fieldDefinition.getValue().getVendorTypeNumber());
+					}
+
+					pstInsert.executeUpdate();
+				}
+				finally
+				{
+					Utils.close(pstInsert);
+				}
 			}
 		}
-
-		return res;
 	}
 
 	public void setIdField(String idFieldName, String idFieldValue)
